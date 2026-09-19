@@ -855,9 +855,9 @@ function InventoryWithSummary({ warehouse }: { warehouse: O }) {
             ),
             (row) => row.display_id,
           ],
-          ["Supplier", (row) => row.supplier_name || "—"],
+          ["Supplier", (row) => <SupplierLink id={row.supplier_id} name={row.supplier_name} />, (row) => row.supplier_name || ""],
           ["Category", (row) => row.category_name || "—"],
-          ["Product", (row) => row.product_name],
+          ["Product", (row) => <ProductLink id={row.id} name={row.product_name} />, (row) => row.product_name || ""],
           [
             "Invoice code",
             (row) =>
@@ -1030,7 +1030,7 @@ function InventoryDetail({ admin }: { admin: boolean }) {
           ["Type", (row) => <StatusValue value={row.type} />],
           ["Status", (row) => row.status || "—"],
           ["Quantity", (row) => row.quantity ?? "—"],
-          ["Supplier", (row) => row.supplier_name || "—"],
+          ["Supplier", (row) => <SupplierLink id={row.supplier_id} name={row.supplier_name} />, (row) => row.supplier_name || ""],
           ["Warehouse", (row) => row.warehouse_name || "—"],
           ["Changes", (row) => <ChangeButton activity={row} />],
           ["Notes", (row) => <NoteButton note={row.notes} label="View" />],
@@ -1605,17 +1605,10 @@ function Dashboard() {
             cols={[
               [
                 "Product",
-                (product) => (
-                  <Link
-                    className="inventory-id-link"
-                    to={`/inventory/${product.product_id}`}
-                  >
-                    {product.product_name}
-                  </Link>
-                ),
+                (product) => <ProductLink id={product.product_id} name={product.product_name} />,
                 (product) => product.product_name,
               ],
-              ["Supplier", (product) => product.supplier_name || "—"],
+              ["Supplier", (product) => <SupplierLink id={product.supplier_id} name={product.supplier_name} />, (product) => product.supplier_name || ""],
               ["Category", (product) => product.category_name || "—"],
               [
                 "Invoice code",
@@ -1637,6 +1630,32 @@ function Dashboard() {
         </section>
       ))}
     </>
+  );
+}
+
+function ProductLink({ id, name }: { id?: string | null; name?: string | null }) {
+  if (!name) return <>—</>;
+  return id ? (
+    <Link className="inventory-id-link" to={`/inventory/${id}`}>
+      {name}
+    </Link>
+  ) : (
+    <>{name}</>
+  );
+}
+
+function SupplierLink({ id, name }: { id?: string | null; name?: string | null }) {
+  if (!name) return <>—</>;
+  return id ? (
+    <Link
+      className="supplier-link"
+      to={`/suppliers/${encodeURIComponent(name)}`}
+      state={{ supplierId: id }}
+    >
+      {name}
+    </Link>
+  ) : (
+    <>{name}</>
   );
 }
 
@@ -1754,9 +1773,9 @@ function ReservedProducts() {
       <T
         rows={rows}
         cols={[
-          ["Supplier", (row) => row.supplier_name || "—"],
+          ["Supplier", (row) => <SupplierLink id={row.supplier_id} name={row.supplier_name} />, (row) => row.supplier_name || ""],
           ["Selling date", (row) => dt(row.action_date)],
-          ["Product", (row) => row.product_name],
+          ["Product", (row) => <ProductLink id={row.product_id} name={row.product_name} />, (row) => row.product_name || ""],
           ["Reserved", (row) => row.quantity],
           ["Warehouse", (row) => row.warehouse_name],
           ["Available now", (row) => <StockValue value={row.available_quantity} />],
@@ -1832,17 +1851,10 @@ function InvoiceDetails() {
           <T
             rows={details.products}
             cols={[
-              ["Supplier", (row) => row.supplier_name || "—"],
+              ["Supplier", (row) => <SupplierLink id={row.supplier_id} name={row.supplier_name} />, (row) => row.supplier_name || ""],
               [
                 "Product",
-                (row) => (
-                  <Link
-                    className="inventory-id-link"
-                    to={`/inventory/${row.product_id}`}
-                  >
-                    {row.product_name}
-                  </Link>
-                ),
+                (row) => <ProductLink id={row.product_id} name={row.product_name} />,
                 (row) => row.product_name,
               ],
               ["Warehouse", (row) => invoiceWarehouses(row.warehouse_stock)],
@@ -2147,11 +2159,11 @@ function Products() {
       ),
       (product) => product.display_id,
     ],
-    ["Name", (product) => product.name],
+    ["Name", (product) => <ProductLink id={product.id} name={product.name} />, (product) => product.name],
     ["Category", (product) => product.category_name || "—"],
   ];
   if (!filters.supplierId)
-    columns.push(["Supplier", (product) => product.supplier_name || "—"]);
+    columns.push(["Supplier", (product) => <SupplierLink id={product.supplier_id} name={product.supplier_name} />, (product) => product.supplier_name || ""]);
   columns.push([
     "Invoice code",
     (product) =>
@@ -2338,15 +2350,7 @@ function Suppliers({ admin }: { admin: boolean }) {
         cols={[
           [
             "Supplier",
-            (supplier) => (
-              <Link
-                className="supplier-link"
-                to={`/suppliers/${encodeURIComponent(supplier.name)}`}
-                state={{ supplierId: supplier.id }}
-              >
-                {supplier.name}
-              </Link>
-            ),
+            (supplier) => <SupplierLink id={supplier.id} name={supplier.name} />,
             (supplier) => supplier.name,
           ],
           ["Available products", (supplier) => <StockValue value={supplier.available_products} />],
@@ -2383,7 +2387,8 @@ function SupplierDetail() {
   if (!details) return <p>Loading…</p>;
   const actions = (details.actions || []).map((action: O) => ({
     ...action,
-    supplier_name: details.supplier.name,
+    supplier_name: action.supplier_name || details.supplier.name,
+    supplier_id: action.supplier_id || details.supplier.id,
   }));
   return (
     <>
@@ -2399,14 +2404,7 @@ function SupplierDetail() {
         cols={[
           [
             "Product",
-            (product) => (
-              <Link
-                className="inventory-id-link"
-                to={`/inventory/${product.id}`}
-              >
-                {product.name}
-              </Link>
-            ),
+            (product) => <ProductLink id={product.id} name={product.name} />,
             (product) => product.name,
           ],
           ["Quantity", (product) => <StockValue value={product.quantity} />],
@@ -2456,7 +2454,7 @@ function MovementTable({
   const cols: any = [
     ["Date", (x: O) => dt(x.display_date || x.business_date || x.created_at)],
     ["Movement type", (x: O) => <StatusValue value={x.type} />],
-    ["Product", (x: O) => x.product_name],
+    ["Product", (x: O) => <ProductLink id={x.product_id} name={x.product_name} />, (x: O) => x.product_name || ""],
     [
       "Quantity",
       (x: O) =>
@@ -2465,7 +2463,7 @@ function MovementTable({
           : (x.quantity > 0 && !["TRANSPORT", "RESERVED"].includes(x.type) ? "+" : "") +
             x.quantity,
     ],
-    ["Supplier", (x: O) => x.supplier_name || "—"],
+    ["Supplier", (x: O) => <SupplierLink id={x.supplier_id} name={x.supplier_name} />, (x: O) => x.supplier_name || ""],
     [
       "Notes",
       (x: O) =>

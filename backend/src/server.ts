@@ -404,7 +404,8 @@ app.get(
          )
          SELECT movement.id,movement.product_id,movement.type,movement.quantity,
            movement.business_date,movement.invoice_code,movement.created_at,movement.notes,
-           movement.deleted_at,product.name product_name,
+           movement.deleted_at,movement.supplier_id,
+           actual_supplier.name supplier_name,product.name product_name,
            actor.name employee_name,
            CASE WHEN destination.name IS NULL THEN warehouse.name
              ELSE warehouse.name || ' → ' || destination.name END warehouse_name,
@@ -417,6 +418,7 @@ app.get(
          JOIN supplier_products related ON related.id=movement.product_id
          JOIN products product ON product.id=movement.product_id
          JOIN users actor ON actor.id=movement.user_id
+         LEFT JOIN suppliers actual_supplier ON actual_supplier.id=movement.supplier_id
          LEFT JOIN warehouses warehouse ON warehouse.id=movement.warehouse_id
          LEFT JOIN warehouses destination
            ON destination.id=movement.destination_warehouse_id
@@ -580,7 +582,7 @@ app.get(
       throw error("NOT_FOUND", "This invoice has no imports on that date", 404);
     const products = await pool.query(
       `SELECT product.id product_id,product.name product_name,
-         supplier.name supplier_name,
+         supplier.id supplier_id,supplier.name supplier_name,
          sum(batch.imported_quantity)::integer imported_quantity,
          COALESCE(sum((
            SELECT sum(location.quantity)
@@ -1794,7 +1796,7 @@ app.get(
       `SELECT reservation.id,reservation.quantity,reservation.action_date,
          reservation.notes,reservation.created_at,reservation.holds_stock,
          product.id product_id,product.name product_name,
-         supplier.name supplier_name,
+         reservation.supplier_id,supplier.name supplier_name,
          warehouse.id warehouse_id,warehouse.name warehouse_name,
          creator.name employee_name,
          COALESCE(stock.quantity,0)::integer physical_quantity,
@@ -2452,7 +2454,8 @@ app.get(
              PARTITION BY warehouse.id
            )::integer warehouse_products,
            product.id product_id,
-           product.name product_name,supplier.name supplier_name,
+           product.name product_name,product.supplier_id,
+           supplier.name supplier_name,
            category.name category_name,
            COALESCE((
              SELECT sum(location_reservation.quantity)
@@ -2519,6 +2522,7 @@ app.get(
           warehouse_id: row.warehouse_id,
           product_id: row.product_id,
           product_name: row.product_name,
+          supplier_id: row.supplier_id,
           supplier_name: row.supplier_name,
           category_name: row.category_name,
           invoice_codes: row.invoice_codes,
@@ -2667,7 +2671,7 @@ app.get(
         `EXISTS(SELECT 1 FROM stock_movements sm WHERE ${movementWhere.join(" AND ")})`,
       );
     const result = await pool.query(
-      `SELECT p.id,p.name product_name,${quantityExpression} quantity,
+      `SELECT p.id,p.supplier_id,p.name product_name,${quantityExpression} quantity,
          ${reservedExpression}::integer reserved_quantity,
          ${availableExpression}::integer available_quantity,p.description notes,
          s.name supplier_name,c.name category_name,
@@ -2724,7 +2728,7 @@ app.get(
              ELSE 'ACTIVE'
            END status,
            abs(sm.quantity) quantity,
-           supplier.name supplier_name,
+           sm.supplier_id,supplier.name supplier_name,
            CASE WHEN destination_warehouse.name IS NULL THEN warehouse.name
              ELSE warehouse.name || ' → ' || destination_warehouse.name END warehouse_name,
            activity_product.name product_name,
