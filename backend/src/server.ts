@@ -164,7 +164,7 @@ const databaseDate = (value: unknown) => {
     : businessDate(new Date(text));
 };
 const productSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1),
   categoryId: id,
   supplierId: id,
   description: z.string().optional().nullable(),
@@ -3052,7 +3052,10 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
     return res.status(409).json({
       error: {
         code: "DUPLICATE",
-        message: "A record with that value already exists",
+        message:
+          e.constraint === "products_name_unique_normalized"
+            ? "A product with this name already exists."
+            : "A record with that value already exists",
       },
     });
   if (e.code === "23503")
