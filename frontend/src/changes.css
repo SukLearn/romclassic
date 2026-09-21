@@ -1619,3 +1619,17 @@ h3 {
   color: #d33b3b;
   font-weight: 700;
 }
+.danger-button {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}
+
+.danger-button:hover {
+  background: #8f1d14;
+  border-color: #8f1d14;
+}
+
+.supplier-delete-button {
+  margin-left: auto;
+}

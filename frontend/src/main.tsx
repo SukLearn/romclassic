@@ -27,6 +27,7 @@ import {
   installLanguageSupport,
   readLanguage,
   saveLanguage,
+  translateMessage,
   type AppLanguage,
 } from "./i18n";
 import { installMobileControls } from "./mobileControls";
@@ -96,9 +97,11 @@ function NumericInput({
   const htmlPattern = integer
     ? "(?:0|[1-9][0-9]*)"
     : "(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?";
-  const formatError = integer
-    ? "Enter a whole number without leading zeroes."
-    : "Enter a number without leading zeroes, using at most one decimal point.";
+  const formatError = translateMessage(
+    integer
+      ? "Enter a whole number without leading zeroes."
+      : "Enter a number without leading zeroes, using at most one decimal point.",
+  );
 
   const showError = (element: HTMLInputElement, message = formatError) => {
     element.setCustomValidity(message);
@@ -117,7 +120,7 @@ function NumericInput({
       (minimum !== undefined && numericValue < minimum) ||
       (maximum !== undefined && numericValue > maximum)
     )
-      return "Enter a value within the allowed range.";
+      return translateMessage("Enter a value within the allowed range.");
     return "";
   };
 
@@ -203,7 +206,7 @@ function NumericInput({
           const element = event.currentTarget;
           const message =
             element.validity.valueMissing
-              ? "This numeric field is required."
+              ? translateMessage("This numeric field is required.")
               : rangeError(element.value) || formatError;
           showError(element, message);
           onInvalid?.(event);
@@ -1059,10 +1062,19 @@ async function api(u: string, o: RequestInit = {}): Promise<any> {
   if (o.body && !(o.body instanceof FormData) && !headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
   if (tok()) headers.set("Authorization", "Bearer " + tok());
-  const r = await fetch("/api" + u, {
-    ...o,
-    headers,
-  });
+  let r: Response;
+  try {
+    r = await fetch("/api" + u, {
+      ...o,
+      headers,
+    });
+  } catch (requestError) {
+    const message =
+      requestError instanceof Error
+        ? requestError.message
+        : "Network request failed";
+    throw Error(translateMessage(message));
+  }
   const text = r.status === 204 ? "" : await r.text();
   let d: O | null = null;
   if (text) {
@@ -1077,7 +1089,9 @@ async function api(u: string, o: RequestInit = {}): Promise<any> {
     window.dispatchEvent(new Event(authExpiredEvent));
   }
   if (!r.ok)
-    throw Error(d?.error?.message || `Request failed (${r.status})`);
+    throw Error(
+      translateMessage(d?.error?.message || `Request failed (${r.status})`),
+    );
   return d;
 }
 let warehouseRowsRequest: Promise<O[]> | undefined;
@@ -1364,7 +1378,7 @@ function NoteButton({
         <div className="modal-backdrop" onClick={() => setOpen(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Note</h3>
-            <p>{note}</p>
+            <p data-no-translate>{note}</p>
             <button onClick={() => setOpen(false)}>Close</button>
           </div>
         </div>
@@ -2307,6 +2321,17 @@ function Suppliers({ admin }: { admin: boolean }) {
       setMessage(error.message);
     }
   };
+  const deleteSupplier = async (supplier: O) => {
+    if (!confirm(`Delete supplier “${supplier.name}”?`)) return;
+    try {
+      await api(`/suppliers/${supplier.id}`, { method: "DELETE" });
+      setEditing(undefined);
+      setMessage("Supplier deleted successfully.");
+      void load();
+    } catch (error: any) {
+      setMessage(error.message);
+    }
+  };
   return (
     <>
       <h2>Suppliers</h2>
@@ -2337,9 +2362,17 @@ function Suppliers({ admin }: { admin: boolean }) {
                 Notes
                 <textarea name="notes" defaultValue={editing.notes || ""} />
               </label>
+              {message && <p className="error">{message}</p>}
               <div className="toolbar">
                 <button className="form-submit">Save</button>
                 <button type="button" onClick={() => setEditing(undefined)}>Close</button>
+                <button
+                  type="button"
+                  className="danger-button supplier-delete-button"
+                  onClick={() => deleteSupplier(editing)}
+                >
+                  Delete
+                </button>
               </div>
             </form>
           </div>
@@ -2356,7 +2389,10 @@ function Suppliers({ admin }: { admin: boolean }) {
           ["Available products", (supplier) => <StockValue value={supplier.available_products} />],
           ["Unique products registered", (supplier) => supplier.unique_products_registered],
           ["Notes", (supplier) => <NoteButton note={supplier.notes} />],
-          ["Action", (supplier) => admin ? <button onClick={() => setEditing(supplier)}>Edit</button> : "—"],
+          ["Action", (supplier) => admin ? <button onClick={() => {
+            setMessage("");
+            setEditing(supplier);
+          }}>Edit</button> : "—"],
         ]}
       />
     </>

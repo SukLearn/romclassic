@@ -357,6 +357,53 @@ app.patch(
     res.json(updated);
   }),
 );
+app.delete(
+  "/api/suppliers/:id",
+  auth(["ADMIN"]),
+  asyncRoute(async (req, res) => {
+    const supplierId = id.parse(req.params.id);
+    await tx(async (client) => {
+      const supplier = await client.query(
+        "SELECT id,name FROM suppliers WHERE id=$1 FOR UPDATE",
+        [supplierId],
+      );
+      if (!supplier.rowCount)
+        throw error("NOT_FOUND", "Supplier not found", 404);
+
+      const references = await client.query(
+        `SELECT
+           (SELECT count(*)::integer FROM products WHERE supplier_id=$1) product_count,
+           EXISTS(SELECT 1 FROM stock_movements WHERE supplier_id=$1)
+             OR EXISTS(SELECT 1 FROM inventory_batches WHERE supplier_id=$1)
+             OR EXISTS(SELECT 1 FROM inventory_reservations WHERE supplier_id=$1)
+             OR EXISTS(SELECT 1 FROM sale_items WHERE supplier_id=$1)
+             OR EXISTS(SELECT 1 FROM reservations WHERE supplier_id=$1)
+             AS has_history`,
+        [supplierId],
+      );
+      const { product_count: productCount, has_history: hasHistory } =
+        references.rows[0];
+      if (productCount > 0)
+        throw error(
+          "SUPPLIER_IN_USE",
+          `This supplier is linked to ${productCount} product(s). Reassign them before deleting the supplier.`,
+          409,
+        );
+      if (hasHistory)
+        throw error(
+          "SUPPLIER_IN_USE",
+          "This supplier has inventory history and cannot be deleted.",
+          409,
+        );
+
+      await client.query("DELETE FROM suppliers WHERE id=$1", [supplierId]);
+      await audit(client, req.user!, "DELETE", "SUPPLIER", supplierId, {
+        name: supplier.rows[0].name,
+      });
+    });
+    res.status(204).end();
+  }),
+);
 app.get(
   "/api/suppliers/:id/inventory",
   auth(),
@@ -3055,7 +3102,9 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
         message:
           e.constraint === "products_name_unique_normalized"
             ? "A product with this name already exists."
-            : "A record with that value already exists",
+            : e.constraint === "suppliers_name_unique_normalized"
+              ? "A supplier with this name already exists."
+              : "A record with that value already exists",
       },
     });
   if (e.code === "23503")
