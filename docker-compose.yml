@@ -1,4 +1,16 @@
 services:
+  postgres-data-init:
+    image: postgres:16-alpine
+    user: "0:0"
+    restart: "no"
+    environment:
+      LEGACY_POSTGRES_DIR: /legacy-postgres
+      POSTGRES_DATA_DIR: /var/lib/postgresql/data
+    volumes:
+      - ./data/postgres:/legacy-postgres:ro
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-postgres-data.sh:/scripts/init-postgres-data.sh:ro
+    entrypoint: ["sh", "/scripts/init-postgres-data.sh"]
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -7,18 +19,25 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-furniture_inventory}
       POSTGRES_USER: ${POSTGRES_USER:-inventory}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_INITDB_ARGS: --data-checksums
       TZ: ${APP_TIMEZONE:-Asia/Tbilisi}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    depends_on:
+      postgres-data-init:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-inventory} -d ${POSTGRES_DB:-furniture_inventory}",
+          "pg_isready -U ${POSTGRES_USER:-inventory} -d ${POSTGRES_DB:-furniture_inventory} && psql -U ${POSTGRES_USER:-inventory} -d ${POSTGRES_DB:-furniture_inventory} -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null",
         ]
       interval: 5s
       timeout: 5s
       retries: 15
+      start_period: 10s
+    shm_size: 256mb
+    stop_grace_period: 60s
   backend:
     build: ./backend
     restart: unless-stopped
@@ -59,6 +78,7 @@ services:
       PGDATABASE: ${POSTGRES_DB:-furniture_inventory}
       PGUSER: ${POSTGRES_USER:-inventory}
       PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      PGCONNECT_TIMEOUT: 10
       TZ: ${APP_TIMEZONE:-Asia/Tbilisi}
       BACKUP_ROOT: /backups
       UPLOAD_ROOT: /uploads
@@ -85,3 +105,7 @@ services:
       start_period: 5s
     ports:
       - "${FRONTEND_BIND_ADDRESS:-0.0.0.0}:${FRONTEND_PORT:-3000}:80"
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-romclassic_postgres_data}

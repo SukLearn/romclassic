@@ -56,6 +56,11 @@ create_backup() {
     return 1
   fi
 
+  if ! pg_restore --list "$temp_dir/database.dump" >/dev/null; then
+    log "Database dump could not be read by pg_restore; backup was not marked successful."
+    return 1
+  fi
+
   if [ -d "$UPLOAD_ROOT" ]; then
     if ! tar -czf "$temp_dir/uploads.tar.gz" -C "$UPLOAD_ROOT" .; then
       log "Uploads archive failed; backup was not marked successful."
