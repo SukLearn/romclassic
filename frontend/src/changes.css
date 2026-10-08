@@ -620,6 +620,98 @@ h3 {
 .inventory-action-forms form > p {
   align-self: center;
 }
+.inventory-action-forms .new-product-toggle {
+  flex-direction: row;
+  gap: 8px;
+}
+.inventory-action-forms .new-product-toggle input {
+  width: 18px;
+  min-height: 18px;
+  height: 18px;
+  padding: 0;
+  flex: 0 0 auto;
+}
+.product-search {
+  position: relative;
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.product-search > label {
+  display: block;
+  margin-bottom: 4px;
+}
+.product-search-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding-right: 12px;
+}
+.product-search-control:focus-within {
+  border-color: var(--button);
+  box-shadow: 0 0 0 3px var(--focus);
+}
+.product-search-control input {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.product-availability {
+  color: var(--availability-color, #218739);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.product-search-options {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  inset-inline: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 18px var(--shadow);
+}
+.product-search-options > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+.product-search-options > [role="option"] {
+  cursor: pointer;
+}
+.product-search-options > [role="option"]:hover,
+.product-search-options > .is-highlighted,
+.product-search-options > [aria-selected="true"] {
+  background: var(--panel-alt);
+}
+.product-search-empty {
+  color: var(--muted);
+}
+.settings-form .availability-color-setting input[type="color"] {
+  width: 80px;
+  height: 40px;
+  padding: 4px;
+  cursor: pointer;
+}
+.availability-preview {
+  font-size: 0.9em;
+}
 .new-product-fields {
   display: grid;
   grid-column: 1 / -1;

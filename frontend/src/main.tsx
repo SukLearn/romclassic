@@ -31,6 +31,7 @@ import {
   type AppLanguage,
 } from "./i18n";
 import { installMobileControls } from "./mobileControls";
+import { ProductSearch, type ProductOption } from "./ProductSearch";
 
 installLanguageSupport();
 installMobileControls();
@@ -283,9 +284,16 @@ function EmployeePasswordButton({
 }
 const preferenceEvent = "furniture-shop-preferences";
 const readShopName = () => localStorage.getItem("shopName") || "Rom Classic";
+const readAvailabilityColor = () => {
+  const color = localStorage.getItem("availabilityColor") || "";
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : "#218739";
+};
+const applyAvailabilityColor = () =>
+  document.documentElement.style.setProperty("--availability-color", readAvailabilityColor());
 const applyTheme = (theme = localStorage.getItem("theme") || "White") =>
   (document.documentElement.dataset.theme = theme.toLowerCase());
 applyTheme();
+applyAvailabilityColor();
 document.title = "Inventory";
 function StatusValue({ value }: { value: any }) {
   const v = String(value || "");
@@ -575,12 +583,15 @@ function SettingsWithPreferences({ admin }: { admin: boolean }) {
   const [shopName, setShopName] = useState(readShopName()),
     [theme, setTheme] = useState(localStorage.getItem("theme") || "White"),
     [language, setLanguage] = useState<AppLanguage>(readLanguage()),
+    [availabilityColor, setAvailabilityColor] = useState(readAvailabilityColor),
     [message, setMessage] = useState("");
   const save = (e: React.FormEvent) => {
     e.preventDefault();
     const name = shopName.trim() || "Rom Classic";
     localStorage.setItem("shopName", name);
     localStorage.setItem("theme", theme);
+    localStorage.setItem("availabilityColor", availabilityColor);
+    applyAvailabilityColor();
     saveLanguage(language);
     applyTheme(theme);
     document.title = "Inventory";
@@ -650,6 +661,18 @@ function SettingsWithPreferences({ admin }: { admin: boolean }) {
             <option value="English">English</option>
             <option value="Georgian">Georgian</option>
           </select>
+        </label>
+        <label className="availability-color-setting">
+          Availability color
+          <input
+            type="color"
+            value={availabilityColor}
+            onChange={(event) => setAvailabilityColor(event.target.value)}
+          />
+          <span className="availability-preview">
+            <span>Available</span>{" "}
+            <span className="product-availability" style={{ color: availabilityColor }}>(5)</span>
+          </span>
         </label>
         <button className="form-submit settings-action">Save</button>
       </form>
@@ -2571,8 +2594,8 @@ function MovementTable({
   return <T rows={display} cols={cols} />;
 }
 function Inventory({ admin }: { admin: boolean }) {
-  const [products, setProducts] = useState<O[]>([]),
-    [adjustmentProducts, setAdjustmentProducts] = useState<O[]>([]),
+  const [products, setProducts] = useState<(O & ProductOption)[]>([]),
+    [adjustmentProducts, setAdjustmentProducts] = useState<(O & ProductOption)[]>([]),
     [warehouses, setWarehouses] = useState<O[]>([]),
     [categories, setCategories] = useState<O[]>([]),
     [suppliers, setSuppliers] = useState<O[]>([]),
@@ -2580,6 +2603,9 @@ function Inventory({ admin }: { admin: boolean }) {
     [h, sh] = useState<O[]>([]),
     [e, se] = useState(""),
     [notice, setNotice] = useState(""),
+    [newProduct, setNewProduct] = useState(false),
+    [searchReset, setSearchReset] = useState(0),
+    [adjustmentProductsLoading, setAdjustmentProductsLoading] = useState(false),
     [importProductId, setImportProductId] = useState(""),
     [adjustmentProductId, setAdjustmentProductId] = useState(""),
     [invoiceSelection, setInvoiceSelection] = useState("NEW"),
@@ -2618,11 +2644,13 @@ function Inventory({ admin }: { admin: boolean }) {
   useEffect(load, []);
   useEffect(() => {
     setAdjustmentProductId("");
+    setAdjustmentProducts([]);
     if (!adjustmentWarehouseId) {
-      setAdjustmentProducts([]);
+      setAdjustmentProductsLoading(false);
       return;
     }
     let cancelled = false;
+    setAdjustmentProductsLoading(true);
     const includeEmpty = requiresAvailableStock ? "" : "&includeEmpty=true";
     api(
       `/products?warehouseId=${encodeURIComponent(adjustmentWarehouseId)}${includeEmpty}`,
@@ -2637,6 +2665,9 @@ function Inventory({ admin }: { admin: boolean }) {
       })
       .catch((error) => {
         if (!cancelled) se(error.message);
+      })
+      .finally(() => {
+        if (!cancelled) setAdjustmentProductsLoading(false);
       });
     return () => {
       cancelled = true;
@@ -2649,7 +2680,11 @@ function Inventory({ admin }: { admin: boolean }) {
       const f = new FormData(form);
       try {
         const describesProduct =
-          url.endsWith("/import") && f.get("productId") === "NEW";
+          url.endsWith("/import") && newProduct;
+        if (!describesProduct && !f.get("productId")) {
+          se("Select a product from the suggestions.");
+          return;
+        }
         const body = describesProduct
           ? {
               name: f.get("productName"),
@@ -2685,7 +2720,9 @@ function Inventory({ admin }: { admin: boolean }) {
           body: JSON.stringify(body),
         });
         form.reset();
-        setImportProductId("");
+        setNewProduct(false);
+        setImportProductId(describesProduct ? result.id : "");
+        setSearchReset((version) => version + 1);
         setAdjustmentProductId("");
         setInvoiceSelection("NEW");
         setReason("RETURN");
@@ -2694,7 +2731,7 @@ function Inventory({ admin }: { admin: boolean }) {
         setDestinationWarehouseId("");
         setNotice(
           describesProduct
-            ? "Product described with quantity 0. It can now be marked as sold."
+            ? "Product created. You can now import stock for it."
             : result?.reserved
               ? "Product reserved successfully."
               : "Inventory action saved successfully.",
@@ -2705,33 +2742,6 @@ function Inventory({ admin }: { admin: boolean }) {
         se(z.message);
       }
     };
-  const pick = (
-    <select
-      name="productId"
-      required
-      disabled={
-        !adjustmentWarehouseId ||
-        (requiresAvailableStock && !adjustmentProducts.length)
-      }
-      value={adjustmentProductId}
-      onChange={(event) => setAdjustmentProductId(event.target.value)}
-    >
-      <option value="">
-        {!adjustmentWarehouseId
-          ? "Select warehouse first"
-          : requiresAvailableStock && !adjustmentProducts.length
-            ? "No products available for this action"
-            : "Product"}
-      </option>
-      {adjustmentProducts.map((x) => (
-        <option key={x.id} value={x.id}>
-          {x.name} ({["SOLD", "RESERVED", "TRANSPORT"].includes(reason)
-            ? x.warehouse_available_quantity
-            : x.warehouse_quantity})
-        </option>
-      ))}
-    </select>
-  );
   const warehousePick = (
     <select name="warehouseId" required defaultValue="">
       <option value="" disabled>Warehouse</option>
@@ -2748,24 +2758,28 @@ function Inventory({ admin }: { admin: boolean }) {
       <div className="twocol inventory-action-forms">
         <form onSubmit={submit("/inventory/import")}>
           <h3>Import</h3>
-          <label>
-            Product
-            <select
-              name="productId"
-              required
+          {admin && (
+            <label className="checkbox-label new-product-toggle">
+              <input
+                type="checkbox"
+                checked={newProduct}
+                onChange={(event) => {
+                  setNewProduct(event.target.checked);
+                  setImportProductId("");
+                }}
+              />
+              <span>New Product</span>
+            </label>
+          )}
+          {!newProduct && (
+            <ProductSearch
+              key={searchReset}
+              products={products}
               value={importProductId}
-              onChange={(event) => setImportProductId(event.target.value)}
-            >
-              <option value="">Product</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.name} ({product.available_quantity})
-                </option>
-              ))}
-              {admin && <option value="NEW">+ New product</option>}
-            </select>
-          </label>
-          {importProductId === "NEW" && (
+              onChange={setImportProductId}
+            />
+          )}
+          {newProduct && (
             <div className="new-product-fields">
               <label>
                 Product name
@@ -2801,7 +2815,7 @@ function Inventory({ admin }: { admin: boolean }) {
               </label>
             </div>
           )}
-          {importProductId !== "NEW" && (
+          {!newProduct && (
             <>
               <label>Warehouse{warehousePick}</label>
               <label>
@@ -2849,11 +2863,30 @@ function Inventory({ admin }: { admin: boolean }) {
             </>
           )}
           <button className="form-submit inventory-action">
-            {importProductId === "NEW" ? "Describe product" : "Import"}
+            {newProduct ? "Describe product" : "Import"}
           </button>
         </form>
         <form onSubmit={submit("/inventory/adjust")}>
           <h3>Adjustment</h3>
+          <label>
+            Reason
+            <select
+              name="type"
+              value={reason}
+              onChange={(x) => {
+                setReason(x.target.value);
+                setAdjustmentProductId("");
+                if (x.target.value !== "TRANSPORT")
+                  setDestinationWarehouseId("");
+              }}
+            >
+              <option value="RETURN">RETURN</option>
+              <option value="SOLD">SOLD</option>
+              <option value="RESERVED">RESERVED</option>
+              <option>CORRECTION</option>
+              <option>TRANSPORT</option>
+            </select>
+          </label>
           <label>
             Warehouse
             <select
@@ -2863,6 +2896,7 @@ function Inventory({ admin }: { admin: boolean }) {
               onChange={(event) => {
                 const nextWarehouseId = event.target.value;
                 setAdjustmentWarehouseId(nextWarehouseId);
+                setAdjustmentProductId("");
                 if (destinationWarehouseId === nextWarehouseId)
                   setDestinationWarehouseId("");
               }}
@@ -2873,29 +2907,6 @@ function Inventory({ admin }: { admin: boolean }) {
                   {warehouse.name}
                 </option>
               ))}
-            </select>
-          </label>
-          <label>Product{pick}</label>
-          <label>
-            Quantity
-            <NumericInput name="quantity" integer min="1" required />
-          </label>
-          <label>
-            Reason
-            <select
-              name="type"
-              value={reason}
-              onChange={(x) => {
-                setReason(x.target.value);
-                if (x.target.value !== "TRANSPORT")
-                  setDestinationWarehouseId("");
-              }}
-            >
-              <option value="RETURN">RETURN</option>
-              <option value="SOLD">SOLD</option>
-              <option value="RESERVED">RESERVED</option>
-              <option>CORRECTION</option>
-              <option>TRANSPORT</option>
             </select>
           </label>
           <div className="adjustment-variable-slot">
@@ -2937,6 +2948,30 @@ function Inventory({ admin }: { admin: boolean }) {
               </label>
             )}
           </div>
+          <ProductSearch
+            key={`${adjustmentWarehouseId}:${reason}:${searchReset}`}
+            products={adjustmentProducts}
+            value={adjustmentProductId}
+            onChange={setAdjustmentProductId}
+            quantityField={requiresAvailableStock ? "warehouse_available_quantity" : "warehouse_quantity"}
+            disabled={
+              !adjustmentWarehouseId || adjustmentProductsLoading ||
+              (requiresAvailableStock && !adjustmentProducts.length)
+            }
+            placeholder={
+              !adjustmentWarehouseId
+                ? "Select warehouse first"
+                : adjustmentProductsLoading
+                  ? "Loading…"
+                  : requiresAvailableStock && !adjustmentProducts.length
+                    ? "No products available for this action"
+                    : "Search products…"
+            }
+          />
+          <label>
+            Quantity
+            <NumericInput name="quantity" integer min="1" required />
+          </label>
           <label>
             {reason === "RESERVED" ? "Reservation Date" : "Adjustment date"}
             <input

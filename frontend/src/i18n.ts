@@ -19,10 +19,8 @@ const georgian: Record<string, string> = {
     "პროდუქტის დაარქივებამდე დაასრულეთ ან გააუქმეთ მისი მიმდინარე ჯავშნები",
   "Describe product": "პროდუქტის აღწერა",
   "Select warehouse first": "ჯერ აირჩიეთ საწყობი",
-  "No products available to transport":
-    "გადასატანად ხელმისაწვდომი პროდუქტი არ არის",
-  "No products available for this action":
-    "ამ მოქმედებისთვის ხელმისაწვდომი პროდუქტი არ არის",
+  "No products available to transport": "გადასატანად ხელმისაწვდომი პროდუქტი არ არის",
+  "No products available for this action": "ამ მოქმედებისთვის ხელმისაწვდომი პროდუქტი არ არის",
   "Product reserved successfully.": "პროდუქტი წარმატებით დაიჯავშნა.",
   "Inventory action saved successfully.":
     "მარაგის მოქმედება წარმატებით ჩაიწერა.",
@@ -209,6 +207,13 @@ const georgian: Record<string, string> = {
   "New invoice code": "ახალი ინვოისის კოდი",
   "Type or choose a code": "ჩაწერეთ კოდი",
   "+ New product": "+ ახალი პროდუქტი",
+  "New Product": "ახალი პროდუქტი",
+  "Search products…": "მოძებნეთ პროდუქტი…",
+  "No matching products.": "შესაბამისი პროდუქტი ვერ მოიძებნა.",
+  "Select a product from the suggestions.": "აირჩიეთ პროდუქტი შემოთავაზებული სიიდან.",
+  "Availability color": "ფერი",
+  "Product created. You can now import stock for it.":
+    "პროდუქტი შეიქმნა. ახლა შეგიძლიათ მისთვის მარაგის შემოტანა.",
   "Category Management": "კატეგორიების მართვა",
   "Category name": "კატეგორიის სახელი",
   "Create category": "კატეგორიის შექმნა",
