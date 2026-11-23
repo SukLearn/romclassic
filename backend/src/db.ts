@@ -7,7 +7,10 @@ if (!/^[A-Za-z0-9_+\-/]+$/.test(databaseTimeZone))
 
 export const pool = new Pool({
   ...(connectionString ? { connectionString } : {}),
-  options: `-c timezone=${databaseTimeZone}`,
+  // The API only runs short OLTP queries. PostgreSQL's JIT compiler fires on
+  // estimated cost (correlated subqueries inflate it) and then spends tens of
+  // milliseconds compiling a query that executes in a few milliseconds.
+  options: `-c timezone=${databaseTimeZone} -c jit=off`,
   max: Number(process.env.DB_POOL_SIZE || 10),
   connectionTimeoutMillis: 5_000,
   idleTimeoutMillis: 30_000,
@@ -19,15 +22,23 @@ pool.on("error", (error) => {
 
 export async function tx<T>(fn: (c: PoolClient) => Promise<T>) {
   const c = await pool.connect();
+  // A client whose ROLLBACK failed (for example, a dropped connection) must be
+  // discarded instead of being returned to the pool in an unknown state.
+  let brokenClient: Error | undefined;
   try {
     await c.query("BEGIN");
     const out = await fn(c);
     await c.query("COMMIT");
     return out;
   } catch (e) {
-    await c.query("ROLLBACK");
+    try {
+      await c.query("ROLLBACK");
+    } catch (rollbackError) {
+      brokenClient = rollbackError as Error;
+    }
+    // Always surface the error that caused the rollback, not the rollback's.
     throw e;
   } finally {
-    c.release();
+    c.release(brokenClient);
   }
 }

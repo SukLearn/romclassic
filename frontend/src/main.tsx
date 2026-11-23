@@ -741,7 +741,8 @@ function InventoryWithSummary({ warehouse }: { warehouse: O }) {
     [invoices, setInvoices] = useState<O[]>([]),
     [inventoryRows, setInventoryRows] = useState<O[]>([]),
     [filters, setFilters] = useState<O>({}),
-    [errorMessage, setErrorMessage] = useState("");
+    [errorMessage, setErrorMessage] = useState(""),
+    [tableError, setTableError] = useState("");
   const loadPage = () => {
     Promise.all([
       api("/products"),
@@ -754,16 +755,22 @@ function InventoryWithSummary({ warehouse }: { warehouse: O }) {
         setSuppliers(supplierRows);
         setCategories(categoryRows);
         setInvoices(invoiceRows);
+        setErrorMessage("");
       })
       .catch((error) => setErrorMessage(error.message));
   };
   const loadInventoryTable = () => {
+    // Filters change on every keystroke in the invoice field; ignore responses
+    // to superseded requests so an older, slower reply cannot overwrite them.
+    let current = true;
     const q = new URLSearchParams({ warehouseId: warehouse.id });
     Object.entries(filters).forEach(([key, value]) => {
       if (value) q.set(key, String(value));
     });
     api("/inventory/products?" + q)
-      .then((rows) =>
+      .then((rows) => {
+        if (!current) return;
+        setTableError("");
         setInventoryRows(
           rowsByInvoice(
             rows.map((row: O) => ({
@@ -781,9 +788,14 @@ function InventoryWithSummary({ warehouse }: { warehouse: O }) {
             ...row,
             display_id: displayId + 1,
           })),
-        ),
-      )
-      .catch((error) => setErrorMessage(error.message));
+        );
+      })
+      .catch((error) => {
+        if (current) setTableError(error.message);
+      });
+    return () => {
+      current = false;
+    };
   };
   useEffect(loadPage, [warehouse.id]);
   useEffect(loadInventoryTable, [
@@ -868,6 +880,7 @@ function InventoryWithSummary({ warehouse }: { warehouse: O }) {
         </label>
       </form>
       {errorMessage && <p className="error">{errorMessage}</p>}
+      {tableError && <p className="error">{tableError}</p>}
       <h3>Inventory records</h3>
       <T
         rows={inventoryRows}
@@ -1052,7 +1065,7 @@ function InventoryDetail({ admin }: { admin: boolean }) {
       <T
         rows={activity}
         cols={[
-          ["Date", (row) => dt(row.occurred_at)],
+          ["Date", (row) => dt(row.occurred_at), (row) => dateSortValue(row.occurred_at)],
           ["Type", (row) => <StatusValue value={row.type} />],
           ["Status", (row) => row.status || "—"],
           ["Quantity", (row) => row.quantity ?? "—"],
@@ -1150,6 +1163,12 @@ const dt = (v: any) =>
   v ? dateFormatter.format(new Date(v)) : "—";
 const dtt = (v: any) =>
   v ? dateTimeFormatter.format(new Date(v)) : "—";
+// Sort key for date columns: the displayed dd/mm/yyyy text does not sort
+// chronologically.
+const dateSortValue = (v: any) => {
+  const time = v ? new Date(v).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
 const today = (date: Date | string | number = new Date()) => {
   const parts = datePartsFormatter.formatToParts(new Date(date));
   const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
@@ -1186,11 +1205,17 @@ function T({
       const rendered = cols[sort.index][2]
         ? cols[sort.index][2]!(row)
         : cols[sort.index][1](row, 0);
-      return typeof rendered === "number"
-        ? rendered
-        : typeof rendered === "string"
-          ? rendered.toLowerCase()
-          : "";
+      if (typeof rendered === "number") return rendered;
+      if (typeof rendered === "string") return rendered.toLowerCase();
+      // Cells such as <StockValue value={…} /> and <StatusValue value={…} />
+      // carry their sortable value in the `value` prop.
+      if (React.isValidElement<{ value?: unknown }>(rendered)) {
+        const cellValue = rendered.props.value;
+        if (rendered.type === StockValue) return Number(cellValue || 0);
+        if (typeof cellValue === "number") return cellValue;
+        if (typeof cellValue === "string") return cellValue.toLowerCase();
+      }
+      return "";
     };
     return [...rows].sort((a, b) => {
       const av = value(a),
@@ -1607,6 +1632,17 @@ function Dashboard() {
   useEffect(() => {
     api("/dashboard").then(sd).catch((error) => setMessage(error.message));
   }, []);
+  // Stable per-location rows so table pagination is not reset on re-render.
+  const locationRows = useMemo(
+    () =>
+      new Map<string, O[]>(
+        (d?.locations || []).map((location: O) => [
+          location.id,
+          rowsByInvoice(location.products_table || [], "quantity"),
+        ]),
+      ),
+    [d],
+  );
   if (message) return <p className="error">{message}</p>;
   if (!d) return <p>Loading…</p>;
   const locations = Object.fromEntries(
@@ -1638,7 +1674,7 @@ function Dashboard() {
         <section className="dashboard-location-table" key={location.id}>
           <h3>{location.name}</h3>
           <T
-            rows={rowsByInvoice(location.products_table || [], "quantity")}
+            rows={locationRows.get(location.id) || []}
             cols={[
               [
                 "Product",
@@ -1811,7 +1847,7 @@ function ReservedProducts() {
         rows={rows}
         cols={[
           ["Supplier", (row) => <SupplierLink id={row.supplier_id} name={row.supplier_name} />, (row) => row.supplier_name || ""],
-          ["Selling date", (row) => dt(row.action_date)],
+          ["Selling date", (row) => dt(row.action_date), (row) => dateSortValue(row.action_date)],
           ["Product", (row) => <ProductLink id={row.product_id} name={row.product_name} />, (row) => row.product_name || ""],
           ["Reserved", (row) => row.quantity],
           ["Warehouse", (row) => row.warehouse_name],
@@ -2129,12 +2165,16 @@ function Products() {
       invoiceCode: "",
     });
   const load = () => {
+    // Ignore replies to superseded filter requests (one is sent per keystroke
+    // in the invoice field) so stale rows never replace newer results.
+    let current = true;
     const query = new URLSearchParams({ status: "all" });
     Object.entries(filters).forEach(([key, value]) => {
       if (value) query.set(key, value);
     });
-    return api("/products?" + query)
+    api("/products?" + query)
       .then((rows) => {
+        if (!current) return;
         sr(
           rowsByInvoice(
             rows.map((product: O) => ({
@@ -2160,7 +2200,12 @@ function Products() {
         );
         se("");
       })
-      .catch((x) => se(x.message));
+      .catch((x) => {
+        if (current) se(x.message);
+      });
+    return () => {
+      current = false;
+    };
   };
   useEffect(() => {
     Promise.all([
@@ -2511,7 +2556,11 @@ function MovementTable({
     }
   };
   const cols: any = [
-    ["Date", (x: O) => dt(x.display_date || x.business_date || x.created_at)],
+    [
+      "Date",
+      (x: O) => dt(x.display_date || x.business_date || x.created_at),
+      (x: O) => dateSortValue(x.display_date || x.business_date || x.created_at),
+    ],
     ["Movement type", (x: O) => <StatusValue value={x.type} />],
     ["Product", (x: O) => <ProductLink id={x.product_id} name={x.product_name} />, (x: O) => x.product_name || ""],
     [
@@ -2576,21 +2625,28 @@ function MovementTable({
           ),
       ],
     );
-  const display = allowDelete
-    ? rows.filter((x) =>
-        [
-          "IMPORT",
-          "RETURN",
-          "SUPPLIER_RETURN",
-          "SOLD",
-          "LOST",
-          "DESTROYED",
-          "CORRECTION",
-          "TRANSPORT",
-          "REVERSED",
-        ].includes(x.type),
-      )
-    : rows;
+  // Keep the array identity stable between renders; T returns to page 1
+  // whenever its rows change, so a fresh array on every parent re-render (for
+  // example while filling in the import form) would reset the pagination.
+  const display = useMemo(
+    () =>
+      allowDelete
+        ? rows.filter((x) =>
+            [
+              "IMPORT",
+              "RETURN",
+              "SUPPLIER_RETURN",
+              "SOLD",
+              "LOST",
+              "DESTROYED",
+              "CORRECTION",
+              "TRANSPORT",
+              "REVERSED",
+            ].includes(x.type),
+          )
+        : rows,
+    [rows, allowDelete],
+  );
   return <T rows={display} cols={cols} />;
 }
 function Inventory({ admin }: { admin: boolean }) {
@@ -3507,7 +3563,9 @@ function App() {
       try {
         su(await api("/auth/me"));
       } catch {
-        delete localStorage.token;
+        // api() already removes the token when the server answers 401. Any
+        // other failure (backend restarting, network error) is temporary, so
+        // keep the token and let a later reload restore the session.
       } finally {
         sc(false);
       }

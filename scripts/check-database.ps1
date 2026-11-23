@@ -31,6 +31,14 @@ ORDER BY n_dead_tup DESC, relname;
         throw "PostgreSQL diagnostic query failed with exit code $LASTEXITCODE."
     }
 
+    # The queries above use the trusted local socket and succeed even when the
+    # role password no longer matches .env; check a network login as well.
+    Write-Host "`nChecking the password login used by the backend and backup services:"
+    & docker compose run --rm --no-deps backup psql -v ON_ERROR_STOP=1 -tAc 'SELECT 1' | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'PostgreSQL rejected the POSTGRES_PASSWORD from .env. Run scripts\sync-postgres-password.ps1 to re-apply it.'
+    }
+
     Write-Host "`nChecking table and B-tree index integrity:"
     Invoke-CheckedDocker -DockerArguments @('compose', 'exec', '-T', 'postgres', 'sh', '-ec', 'pg_amcheck --database="$POSTGRES_DB" --install-missing -U "$POSTGRES_USER"')
 

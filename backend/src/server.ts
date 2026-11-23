@@ -11,6 +11,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { pool, tx } from "./db";
 import { runMigrations } from "./migrate";
+import { startupHint } from "./diagnostics";
 import { PoolClient } from "pg";
 import {
   businessDate,
@@ -146,9 +147,12 @@ const numericValue = z.union([
     .regex(/^(?:\d+(?:\.\d+)?|\.\d+)$/, "Enter a valid numeric value")
     .transform(Number),
 ]);
+// Quantities are stored in PostgreSQL integer columns.
+const maxStoredInteger = 2_147_483_647;
 const positiveInteger = numericValue
   .refine(Number.isInteger, "Enter a whole number")
-  .refine((value) => value > 0, "Enter a number greater than zero");
+  .refine((value) => value > 0, "Enter a number greater than zero")
+  .refine((value) => value <= maxStoredInteger, "Enter a smaller number");
 const qty = positiveInteger;
 const invoiceCodeSchema = z
   .string()
@@ -691,7 +695,7 @@ app.post(
   "/api/categories",
   auth(["ADMIN"]),
   asyncRoute(async (req, res) => {
-    const x = z.object({ name: z.string().min(1) }).parse(req.body);
+    const x = z.object({ name: z.string().trim().min(1) }).parse(req.body);
     const created = await tx(async (c) => {
       const r = await c.query(
         "INSERT INTO categories(name) VALUES($1) RETURNING *",
@@ -711,7 +715,7 @@ app.patch(
   asyncRoute(async (req, res) => {
     const x = z
       .object({
-        name: z.string().min(1).optional(),
+        name: z.string().trim().min(1).optional(),
         isActive: z.boolean().optional(),
       })
       .parse(req.body);
@@ -2492,12 +2496,16 @@ app.get(
          FROM products`,
       ),
       pool.query(
+        // Only stocked (warehouse, active product) pairs are joined, so the
+        // per-row subqueries below do not run for every product in every
+        // warehouse. A warehouse without stock still yields one row with a
+        // NULL product so its card and empty table are rendered.
         `SELECT warehouse.id warehouse_id,warehouse.name warehouse_name,
            warehouse.slug warehouse_slug,warehouse.kind warehouse_kind,
-           COALESCE(sum(COALESCE(stock.quantity,0)) OVER (
+           COALESCE(sum(stock.quantity) OVER (
              PARTITION BY warehouse.id
            ),0)::integer warehouse_stock,
-           count(*) FILTER (WHERE COALESCE(stock.quantity,0)>0) OVER (
+           count(stock.product_id) OVER (
              PARTITION BY warehouse.id
            )::integer warehouse_products,
            product.id product_id,
@@ -2534,9 +2542,11 @@ app.get(
            ),'[]'::json) invoice_stock,
            COALESCE(stock.quantity,0)::integer quantity
          FROM warehouses warehouse
-         LEFT JOIN products product ON product.is_active
-         LEFT JOIN product_location_stock stock
-           ON stock.product_id=product.id AND stock.warehouse_id=warehouse.id
+         LEFT JOIN (
+           product_location_stock stock
+           JOIN products product
+             ON product.id=stock.product_id AND product.is_active
+         ) ON stock.warehouse_id=warehouse.id AND stock.quantity>0
          LEFT JOIN suppliers supplier ON supplier.id=product.supplier_id
          LEFT JOIN categories category ON category.id=product.category_id
          ORDER BY CASE warehouse.kind WHEN 'SHOWROOM' THEN 0 ELSE 1 END,
@@ -2665,11 +2675,11 @@ app.get(
       productWhere.push(`${quantityExpression}>0`);
     }
     if (req.query.productId)
-      add(productWhere, "p.id=?", String(req.query.productId));
+      add(productWhere, "p.id=?", id.parse(String(req.query.productId)));
     if (req.query.supplierId)
-      add(productWhere, "p.supplier_id=?", String(req.query.supplierId));
+      add(productWhere, "p.supplier_id=?", id.parse(String(req.query.supplierId)));
     if (req.query.categoryId)
-      add(productWhere, "p.category_id=?", String(req.query.categoryId));
+      add(productWhere, "p.category_id=?", id.parse(String(req.query.categoryId)));
     if (req.query.invoiceCode) {
       const invoiceCode = invoiceCodeSchema.parse(
         String(req.query.invoiceCode),
@@ -2700,13 +2710,13 @@ app.get(
       add(
         movementWhere,
         "COALESCE(sm.business_date,sm.created_at::date)>=?::date",
-        String(req.query.from),
+        dateOnly.parse(String(req.query.from)),
       );
     if (req.query.to)
       add(
         movementWhere,
         "COALESCE(sm.business_date,sm.created_at::date)<=?::date",
-        String(req.query.to),
+        dateOnly.parse(String(req.query.to)),
       );
     const hasMovementFilter =
       Boolean(req.query.type) ||
@@ -2849,9 +2859,9 @@ app.get(
       where.push(sql.replace("?", `$${values.length}`));
     };
     if (req.query.productId)
-      add("sm.product_id=?", String(req.query.productId));
+      add("sm.product_id=?", id.parse(String(req.query.productId)));
     if (req.query.supplierId)
-      add("sm.supplier_id=?", String(req.query.supplierId));
+      add("sm.supplier_id=?", id.parse(String(req.query.supplierId)));
     if (req.query.warehouseId) {
       values.push(id.parse(String(req.query.warehouseId)));
       const warehousePlaceholder = `$${values.length}`;
@@ -2867,12 +2877,12 @@ app.get(
     if (req.query.from)
       add(
         "COALESCE(sm.business_date,sm.created_at::date)>=?::date",
-        String(req.query.from),
+        dateOnly.parse(String(req.query.from)),
       );
     if (req.query.to)
       add(
         "COALESCE(sm.business_date,sm.created_at::date)<=?::date",
-        String(req.query.to),
+        dateOnly.parse(String(req.query.to)),
       );
     const r = await pool.query(
       `SELECT sm.id,sm.product_id,sm.type,sm.quantity,sm.user_id,sm.reference_id,
@@ -3095,6 +3105,15 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
         message: e.issues.map((i) => i.message).join("; "),
       },
     });
+  // express.json() parser errors carry an HTTP status but no error code.
+  if (e.type === "entity.parse.failed")
+    return res.status(400).json({
+      error: { code: "VALIDATION", message: "The supplied value is not valid" },
+    });
+  if (e.type === "entity.too.large")
+    return res.status(413).json({
+      error: { code: "PAYLOAD_TOO_LARGE", message: "The request is too large" },
+    });
   if (e.code === "23505")
     return res.status(409).json({
       error: {
@@ -3104,7 +3123,18 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
             ? "A product with this name already exists."
             : e.constraint === "suppliers_name_unique_normalized"
               ? "A supplier with this name already exists."
-              : "A record with that value already exists",
+              : e.constraint === "categories_name_key"
+                ? "A category with this name already exists."
+                : "A record with that value already exists",
+      },
+    });
+  // A foreign-key failure on INSERT/UPDATE means the referenced record does
+  // not exist; on UPDATE/DELETE of the referenced row it means it is in use.
+  if (e.code === "23503" && /^insert or update on table/.test(e.message || ""))
+    return res.status(400).json({
+      error: {
+        code: "REFERENCE_NOT_FOUND",
+        message: "A selected record no longer exists. Refresh the page and try again.",
       },
     });
   if (e.code === "23503")
@@ -3114,7 +3144,9 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
         message: "This record is still used by another part of the application",
       },
     });
-  if (["22007", "22008", "23514"].includes(e.code))
+  // 22P02: malformed value for a column type (uuid, enum); 22003: number out
+  // of range for its column.
+  if (["22P02", "22003", "22007", "22008", "23514"].includes(e.code))
     return res.status(400).json({
       error: { code: "VALIDATION", message: "The supplied value is not valid" },
     });
@@ -3131,7 +3163,8 @@ app.use((e: any, _req: Request, res: Response, _next: NextFunction) => {
   if (!e.status) console.error(e);
   res.status(e.status || 500).json({
     error: {
-      code: e.code || "SERVER_ERROR",
+      // Unexpected errors must not expose internal (e.g. PostgreSQL) codes.
+      code: e.status ? e.code || "REQUEST_ERROR" : "SERVER_ERROR",
       message: e.status ? e.message : "An unexpected server error occurred",
     },
   });
@@ -3168,6 +3201,8 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 
 void start().catch(async (startupError) => {
   console.error("API startup failed", startupError);
+  const hint = startupHint(startupError);
+  if (hint) console.error(`HINT: ${hint}`);
   await pool.end();
   process.exit(1);
 });

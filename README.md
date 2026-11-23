@@ -7,6 +7,10 @@
 3. Run `docker compose up -d --build` once. Containers use `restart: unless-stopped`, so they return after Docker Desktop starts.
 4. Open `http://localhost:3000` (or `http://<laptop-ip>:3000` on the shop LAN). Keep Windows Firewall's private-network prompt enabled.
 
+After every update (`git pull`), run `docker compose up -d --build` again. Without `--build` the containers keep running the previously built code, and new database migrations are not applied.
+
+`POSTGRES_PASSWORD` is applied only when PostgreSQL creates an empty data volume. Changing it in `.env` later does not change the database password; see Troubleshooting.
+
 For an installation created before named-volume database storage was added, run this once instead:
 
 ```powershell
@@ -38,6 +42,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\check-database.ps1
 ```
 
 To restore, stop the application services, validate `SHA256SUMS`, extract `uploads.tar.gz` into `data/uploads`, start PostgreSQL, copy or mount `database.dump` into the PostgreSQL container, and run `pg_restore -U inventory -d furniture_inventory --clean --if-exists --exit-on-error database.dump`. Test restoration on a separate named volume before replacing live data.
+
+## Troubleshooting
+
+**The backend keeps restarting and `docker compose logs backend` shows `password authentication failed for user "inventory"` (code `28P01`).** The password stored in the database volume no longer matches `POSTGRES_PASSWORD` in `.env`. This happens when `.env` is recreated or edited after the volume was created, or when the volume was filled from a cluster created with a different `.env` (`data/postgres`, a restore, another computer). The postgres container still reports healthy because its healthcheck uses the local socket, and the frontend never starts because it waits for a healthy backend. Scheduled backups fail too (empty `.part` directories in `data/backups`).
+
+Re-apply the password from `.env` (no table data is changed):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\sync-postgres-password.ps1
+```
+
+On Linux or macOS run `sh scripts/sync-postgres-password.sh`. `scripts/check-database.ps1` also verifies this password login.
+
+## Local development without Docker
+
+- Backend: `cd backend && npm ci`, then start it with a reachable database, for example `DATABASE_URL=postgres://user:password@127.0.0.1:5432/furniture_inventory npm run dev`. The backend does not read the project-root `.env` (that file configures Docker Compose); outside Docker it uses `DATABASE_URL` or the standard `PG*` variables.
+- Frontend: `cd frontend && npm ci && npm run dev`. The Vite dev server forwards `/api` and `/uploads` to `http://127.0.0.1:4000`; set `VITE_API_PROXY_TARGET` to use another backend address.
+- Tests: `npm test` in `backend` runs the unit tests. The API integration tests also run when `TEST_DATABASE_URL` points to a disposable PostgreSQL database whose name contains `test` (instructions at the top of `backend/src/api.integration.test.ts`). `npm test` in `frontend` type-checks the UI.
 
 ## Architecture
 

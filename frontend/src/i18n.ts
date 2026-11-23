@@ -454,6 +454,11 @@ const georgian: Record<string, string> = {
     "ამ სახელის პროდუქტი უკვე არსებობს.",
   "A supplier with this name already exists.":
     "ამ სახელის მომწოდებელი უკვე არსებობს.",
+  "A category with this name already exists.":
+    "ამ სახელის კატეგორია უკვე არსებობს.",
+  "A selected record no longer exists. Refresh the page and try again.":
+    "არჩეული ჩანაწერი აღარ არსებობს. განაახლეთ გვერდი და სცადეთ ხელახლა.",
+  "The request is too large": "მოთხოვნა ძალიან დიდია",
   "A record with that value already exists": "ასეთი მნიშვნელობის ჩანაწერი უკვე არსებობს",
   "This record is still used by another part of the application":
     "ეს ჩანაწერი კვლავ გამოიყენება აპლიკაციის სხვა ნაწილში",
@@ -464,6 +469,7 @@ const georgian: Record<string, string> = {
   "Enter a valid numeric value": "შეიყვანეთ სწორი რიცხვითი მნიშვნელობა",
   "Enter a whole number": "შეიყვანეთ მთელი რიცხვი",
   "Enter a number greater than zero": "შეიყვანეთ ნულზე მეტი რიცხვი",
+  "Enter a smaller number": "შეიყვანეთ უფრო მცირე რიცხვი",
   "Invoice code must contain digits only":
     "ინვოისის კოდი მხოლოდ ციფრებს უნდა შეიცავდეს",
   "Choose a valid calendar date": "აირჩიეთ სწორი კალენდარული თარიღი",

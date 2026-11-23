@@ -2,6 +2,8 @@
 
 The active application is inventory-only. All `/api/*` endpoints other than `/api/auth/login` require `Authorization: Bearer <token>`. Standard errors use `{ "error": { "code", "message" } }`.
 
+Invalid input, including malformed JSON, malformed IDs, dates or enum values in query strings, and quantities above 2,147,483,647, returns `400 VALIDATION`. A request that references a record that does not exist (for example a deleted category) returns `400 REFERENCE_NOT_FOUND`; deleting a record that is still referenced returns `409 RECORD_IN_USE`; duplicates return `409 DUPLICATE`; bodies over 1 MB return `413 PAYLOAD_TOO_LARGE`. Unexpected failures return `500 SERVER_ERROR` without internal details.
+
 | Resource | Operations |
 | --- | --- |
 | auth | `POST /api/auth/login`, `GET /api/auth/me`, `PUT /api/auth/password` |
